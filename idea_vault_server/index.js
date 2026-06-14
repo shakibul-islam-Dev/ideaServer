@@ -6,22 +6,25 @@ const app = express();
 const mongoUri = process.env.MONGO_DB_URI;
 const PORT = process.env.PORT || 5000;
 const cookieParser = require("cookie-parser");
+
+// Middleware: কুকি, JSON বডি পার্সিং এবং CORS সেটিংস কনফিগারেশন
 app.use(cookieParser());
 app.use(express.json());
 app.use((req, res, next) => {
   next();
 });
 
-// CORS Configuration
+// CORS Configuration: নির্দিষ্ট ডোমেইন থেকে রিকোয়েস্ট এক্সেস অনুমতি দেয়
 app.use(
   cors({
-    origin: ["http://localhost:3000", "https://idea-vault-sooty.vercel.app"],
+    origin: "http://localhost:3000",
     credentials: true,
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
-// JWT Token Verification Setup
+
+// JWT Token Verification Setup: জেসন ওয়েব টোকেন ভেরিফিকেশন এবং ডাটাবেজ ক্লায়েন্ট সেটআপ
 const { createRemoteJWKSet, jwtVerify } = require("jose-cjs");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
@@ -33,11 +36,12 @@ const client = new MongoClient(mongoUri, {
   },
 });
 
-// JWK Token URL (Better Auth থেকে আসা টোকেন ভেরিফাই করার জন্য)
+// JWK Token URL: Better Auth থেকে আসা টোকেন ভেরিফাই করার জন্য পাবলিক কী সেটআপ
 const JWKS = createRemoteJWKSet(
   new URL(`${process.env.CLIENT_URL || "http://localhost:3000"}/api/auth/jwks`),
 );
 
+// Middleware: রিকোয়েস্টের হেডার বা কুকি থেকে টোকেন নিয়ে ইউজার ভেরিফাই করে
 const verifyToken = async (req, res, next) => {
   let token = req.headers.authorization?.split(" ")[1];
 
@@ -57,6 +61,7 @@ const verifyToken = async (req, res, next) => {
       req.user = { id: payload.sub, _id: payload.sub, ...payload };
       return next();
     } catch (jwtError) {
+      // JWT ভেরিফিকেশন ফেইল হলে ডাটাবেজের সেশন থেকে ভেরিফাই করার চেষ্টা
       const db = client.db("IdeaVault");
       const session = await db.collection("session").findOne({ token: token });
 
@@ -65,7 +70,7 @@ const verifyToken = async (req, res, next) => {
       }
 
       const user = await db.collection("user").findOne({ id: session.userId });
-      //afoefe
+
       if (!user) {
         try {
           const userByObjId = await db
@@ -89,17 +94,19 @@ const verifyToken = async (req, res, next) => {
     res.redirect(clientLoginUrl);
   }
 };
+
+// Main Server Function: ডাটাবেজ কানেকশন এবং সকল API এন্ডপয়েন্ট হ্যান্ডলিং
 async function run() {
   try {
-    // await client.connect();
     const db = client.db("IdeaVault");
+    // ডাটাবেজ কালেকশন রেফারেন্স
     const dataBaseCollection = db.collection("IdeaVaults");
     const bookingCollection = db.collection("bookings");
     const commentCollection = db.collection("comments");
     const activitiesCollection = db.collection("activities");
 
     // ==========================================
-    // IDEA ROUTES (Fixed)
+    // IDEA ROUTES: আইডিয়া তৈরি, পড়া, আপডেট এবং মুছে ফেলার এন্ডপয়েন্ট
     // ==========================================
 
     app.post("/api/idea", verifyToken, async (req, res) => {
@@ -205,12 +212,11 @@ async function run() {
     });
 
     // ==========================================
-    // ACTIVITY ROUTES
+    // ACTIVITY ROUTES: ইউজারের কার্যক্রম ট্র্যাক এবং ডিলিট করার এন্ডপয়েন্ট
     // ==========================================
 
     app.get("/api/activity", verifyToken, async (req, res) => {
       try {
-        // userId বের করার লজিক একটু আপডেট করা হয়েছে যেন undefined না হয়
         const userId = req.user.sub || req.user.id || req.user._id?.toString();
         const result = await activitiesCollection
           .find({ userId: userId })
@@ -243,7 +249,7 @@ async function run() {
     });
 
     // ==========================================
-    // BOOKING ROUTES
+    // BOOKING ROUTES: বুকিং সম্পর্কিত ডাটা অপারেশন
     // ==========================================
 
     app.get("/api/bookings", async (req, res) => {
@@ -266,7 +272,7 @@ async function run() {
     });
 
     // ==========================================
-    // COMMENT ROUTES
+    // COMMENT ROUTES: কমেন্ট করা, আপডেট, ডিলিট এবং কার্যক্রম লগ করা
     // ==========================================
 
     app.get("/api/comments", async (req, res) => {
@@ -284,6 +290,7 @@ async function run() {
         const commentData = { ...req.body, userId: userId };
         const result = await commentCollection.insertOne(commentData);
 
+        // কমেন্ট করার পর অ্যাক্টিভিটি লগে ডাটা সেভ
         await activitiesCollection.insertOne({
           userId: userId,
           action: "Posted a new comment",
@@ -308,6 +315,7 @@ async function run() {
           { $set: { text: updatedData.text, time: updatedData.time } },
         );
 
+        // কমেন্ট আপডেটের পর অ্যাক্টিভিটি লগে ডাটা সেভ
         await activitiesCollection.insertOne({
           userId: userId,
           action: "Updated a comment",
@@ -333,6 +341,7 @@ async function run() {
           _id: new ObjectId(id),
         });
 
+        // কমেন্ট ডিলিটের পর অ্যাক্টিভিটি লগে ডাটা সেভ
         if (result.deletedCount > 0) {
           await activitiesCollection.insertOne({
             userId: userId,
@@ -358,10 +367,12 @@ async function run() {
 
 run().catch(console.dir);
 
+// Root route
 app.get("/", (req, res) => {
   res.send("Server is running and Database is ready!");
 });
 
+// Server listener
 app.listen(PORT, () => {
   console.log(`Server is running on Port ${PORT}`);
 });
