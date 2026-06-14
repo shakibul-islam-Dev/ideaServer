@@ -3,7 +3,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const app = express();
-const mongoUri = process.env.MONGODB_URI;
+const mongoUri = process.env.MONGO_DB_URI;
 const PORT = process.env.PORT || 5000;
 const cookieParser = require("cookie-parser");
 app.use(cookieParser());
